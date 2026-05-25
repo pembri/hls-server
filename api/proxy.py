@@ -25,6 +25,7 @@ class handler(BaseHTTPRequestHandler):
         target   = params.get('url',  [None])[0]
         ref      = params.get('ref',  [None])[0]
         origin   = params.get('origin', [None])[0]
+        ua       = params.get('ua',   [None])[0]
 
         if not target:
             self._error(400, 'Missing ?url= parameter')
@@ -45,7 +46,8 @@ class handler(BaseHTTPRequestHandler):
         req = urllib.request.Request(target)
 
         # Header yang bikin server kira request dari browser asli
-        req.add_header('User-Agent',      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')
+        user_agent = ua or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        req.add_header('User-Agent',      user_agent)
         req.add_header('Referer',         referer)
         req.add_header('Origin',          target_origin)
         req.add_header('Accept',          '*/*')
@@ -67,7 +69,7 @@ class handler(BaseHTTPRequestHandler):
             )
 
             if is_m3u8:
-                body = self._rewrite_m3u8(body, target, referer)
+                body = self._rewrite_m3u8(body, target, referer, ua)
                 content_type = 'application/vnd.apple.mpegurl'
 
             self.send_response(200)
@@ -85,12 +87,13 @@ class handler(BaseHTTPRequestHandler):
         except Exception as e:
             self._error(500, f'Proxy error: {str(e)}')
 
-    def _rewrite_m3u8(self, body: bytes, base_url: str, referer: str) -> bytes:
+    def _rewrite_m3u8(self, body: bytes, base_url: str, referer: str, ua: str = None) -> bytes:
         """Rewrite semua URL segmen dalam m3u8 supaya lewat proxy ini."""
         text     = body.decode('utf-8', errors='replace')
         base     = base_url[:base_url.rfind('/') + 1]
         out      = []
         ref_part = urllib.parse.quote(referer, safe='') if referer else ''
+        ua_part  = urllib.parse.quote(ua, safe='') if ua else ''
 
         for line in text.splitlines():
             stripped = line.strip()
@@ -109,6 +112,8 @@ class handler(BaseHTTPRequestHandler):
             proxied = f'/api/proxy?url={encoded}'
             if ref_part:
                 proxied += f'&ref={ref_part}'
+            if ua_part:
+                proxied += f'&ua={ua_part}'
             out.append(proxied)
 
         return '\n'.join(out).encode('utf-8')
