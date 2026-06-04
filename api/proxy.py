@@ -47,7 +47,7 @@ class handler(BaseHTTPRequestHandler):
         req = urllib.request.Request(target)
 
         # Header yang bikin server kira request dari browser asli
-        user_agent = ua or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+        user_agent = ua or 'Lavf/58.76.100'
         req.add_header('User-Agent',      user_agent)
         req.add_header('Referer',         referer)
         req.add_header('Origin',          target_origin)
