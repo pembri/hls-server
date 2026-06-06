@@ -47,7 +47,7 @@ class handler(BaseHTTPRequestHandler):
         req = urllib.request.Request(target)
 
         # Header yang bikin server kira request dari browser asli
-        user_agent = ua or 'Lavf/58.76.100'
+        user_agent = ua or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
         req.add_header('User-Agent',      user_agent)
         req.add_header('Referer',         referer)
         req.add_header('Origin',          target_origin)
@@ -118,9 +118,9 @@ class handler(BaseHTTPRequestHandler):
             else:
                 abs_url = base + stripped
 
-            # Rewrite lewat proxy
+            # Rewrite lewat proxy — pakai absolute URL supaya HLS.js bisa resolve
             encoded = urllib.parse.quote(abs_url, safe='')
-            proxied = f'/api/proxy?url={encoded}'
+            proxied = f'https://proxy-server.vidiraplay.biz.id/api/proxy?url={encoded}'
             if ref_part:
                 proxied += f'&ref={ref_part}'
             if ua_part:
