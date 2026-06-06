@@ -118,9 +118,9 @@ class handler(BaseHTTPRequestHandler):
             else:
                 abs_url = base + stripped
 
-            # Rewrite lewat proxy — pakai absolute URL supaya HLS.js bisa resolve
+            # Rewrite lewat proxy
             encoded = urllib.parse.quote(abs_url, safe='')
-            proxied = f'https://proxy-server.vidiraplay.biz.id/api/proxy?url={encoded}'
+            proxied = f'/api/proxy?url={encoded}'
             if ref_part:
                 proxied += f'&ref={ref_part}'
             if ua_part:
