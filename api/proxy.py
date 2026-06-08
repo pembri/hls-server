@@ -86,7 +86,11 @@ class handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type',                content_type)
             self.send_header('Content-Length',              str(len(body)))
-            self.send_header('Cache-Control',               'no-cache, no-store')
+            # Manifest (m3u8/mpd) harus selalu fresh; segment video boleh di-cache browser
+            if is_m3u8 or is_mpd:
+                self.send_header('Cache-Control', 'no-cache, no-store')
+            else:
+                self.send_header('Cache-Control', 'public, max-age=10')
             self._cors()
             self.end_headers()
             self.wfile.write(body)
