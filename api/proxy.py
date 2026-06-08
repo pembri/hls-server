@@ -58,7 +58,7 @@ class handler(BaseHTTPRequestHandler):
         req.add_header('Connection',      'keep-alive')
 
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 content_type = resp.headers.get('Content-Type', 'application/octet-stream')
                 body         = resp.read()
 
@@ -203,16 +203,16 @@ class handler(BaseHTTPRequestHandler):
             abs_val = to_absolute(val)
             if not (abs_val.startswith('http://') or abs_val.startswith('https://')):
                 return m.group(0)
-            # Pisahkan bagian template variable
+            # Pisahkan bagian template variable ($Number$, $Time$, $RepresentationID$, dll)
             parts = re.split(r'(\$[^$]+\$)', abs_val)
             encoded_parts = []
             for part in parts:
                 if part.startswith('$') and part.endswith('$'):
-                    # Template variable — biarkan literal agar dash.js expand
+                    # Template variable — biarkan literal agar dash.js expand sebelum fetch
                     encoded_parts.append(part)
                 else:
-                    # URL biasa — encode
-                    encoded_parts.append(urllib.parse.quote(part, safe=''))
+                    # Encode hanya karakter yang benar-benar perlu (biarkan :/?=&#@ untuk URL)
+                    encoded_parts.append(urllib.parse.quote(part, safe=':/?=&#@!$&\'()*+,;@%'))
             encoded_val = ''.join(encoded_parts)
             proxy_url = f'{PROXY_BASE}/api/proxy?url={encoded_val}'
             if ref_enc:
