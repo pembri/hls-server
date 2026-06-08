@@ -57,10 +57,18 @@ class handler(BaseHTTPRequestHandler):
         req.add_header('Pragma',          'no-cache')
         req.add_header('Connection',      'keep-alive')
 
+        # --- TERUSKAN HEADER RANGE DARI CLIENT ---
+        client_range = self.headers.get('Range')
+        if client_range:
+            req.add_header('Range', client_range)
+
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
-                content_type = resp.headers.get('Content-Type', 'application/octet-stream')
-                body         = resp.read()
+                # --- TANGKAP STATUS CODE & CONTENT-RANGE ---
+                status_code   = resp.getcode()
+                content_type  = resp.headers.get('Content-Type', 'application/octet-stream')
+                content_range = resp.headers.get('Content-Range')
+                body          = resp.read()
 
             # Kalau m3u8 — rewrite semua segment URL lewat proxy ini juga
             is_m3u8 = (
@@ -83,10 +91,14 @@ class handler(BaseHTTPRequestHandler):
                 body = self._rewrite_mpd(body, target, referer, ua)
                 content_type = 'application/dash+xml'
 
-            self.send_response(200)
-            self.send_header('Content-Type',                content_type)
-            self.send_header('Content-Length',              str(len(body)))
-            self.send_header('Cache-Control',               'no-cache, no-store')
+            # --- KIRIM RESPONSE SESUAI ASLI ---
+            self.send_response(status_code)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(body)))
+            if content_range:
+                self.send_header('Content-Range', content_range)
+                
+            self.send_header('Cache-Control', 'no-cache, no-store')
             self._cors()
             self.end_headers()
             self.wfile.write(body)
@@ -173,42 +185,27 @@ class handler(BaseHTTPRequestHandler):
             abs_url = to_absolute(url)
             if abs_url.startswith('http://') or abs_url.startswith('https://'):
                 proxied = make_proxy(abs_url)
-                # FIX: Tambah trailing slash lewat separator khusus agar
-                # dash.js bisa gabungkan segment relatif dengan benar.
-                # Karena proxy URL selalu punya '?', kita tidak bisa pakai '/'
-                # di akhir — dash.js akan otomatis append segment ke query string.
-                # Solusi: gunakan &_base=1 sebagai marker, lalu di proxy kita
-                # forward ke URL asli. Tapi pendekatan terbaik adalah inject
-                # BaseURL yang mengarah ke proxy direktori, bukan file.
-                #
-                # Untuk CloudFront/MediaPackage: BaseURL biasanya sudah absolute
-                # di setiap segment, jadi BaseURL rewrite hanya diperlukan sebagai
-                # fallback. Prioritaskan rewrite SegmentTemplate & SegmentURL.
                 return f'<BaseURL>{proxied}</BaseURL>'
             return m.group(0)
 
         text = re.sub(r'<BaseURL>(.*?)<\/BaseURL>', rewrite_baseurl, text, flags=re.DOTALL)
 
         # ── 2. Rewrite SegmentTemplate media= dan initialization= ───────────────
-        # Pisahkan template variable ($Number$, $Time$, $RepresentationID$, dll)
-        # dari bagian URL. Bagian URL di-encode, template var dibiarkan literal
-        # sehingga dash.js bisa expand sebelum fetch.
         def rewrite_template_attr(m):
-            attr = m.group(1)   # "media" atau "initialization"
+            attr = m.group(1)   
             val  = m.group(2)
             abs_val = to_absolute(val)
             if not (abs_val.startswith('http://') or abs_val.startswith('https://')):
                 return m.group(0)
-            # Pisahkan bagian template variable
+            
             parts = re.split(r'(\$[^$]+\$)', abs_val)
             encoded_parts = []
             for part in parts:
                 if part.startswith('$') and part.endswith('$'):
-                    # Template variable — biarkan literal agar dash.js expand
                     encoded_parts.append(part)
                 else:
-                    # URL biasa — encode
                     encoded_parts.append(urllib.parse.quote(part, safe=''))
+            
             encoded_val = ''.join(encoded_parts)
             proxy_url = f'{PROXY_BASE}/api/proxy?url={encoded_val}'
             if ref_enc:
@@ -224,8 +221,6 @@ class handler(BaseHTTPRequestHandler):
         )
 
         # ── 3. Rewrite <SegmentURL media= (SegmentList format) ──────────────────
-        # Format: <SegmentURL media="chunk_1.m4s" mediaRange="..."/>
-        # Dipakai oleh AWS MediaPackage, Bitmovin, dll
         def rewrite_segment_url_media(m):
             val = m.group(1)
             abs_url = to_absolute(val)
@@ -246,10 +241,8 @@ class handler(BaseHTTPRequestHandler):
         text = re.sub(r'sourceURL="([^"]+)"', rewrite_init_source, text)
 
         # ── 5. Rewrite atribut src= generik di elemen DASH ──────────────────────
-        # Beberapa encoder nonstandar menggunakan src= langsung
         def rewrite_generic_src(m):
             val = m.group(1)
-            # Skip kalau template variable
             if '$' in val:
                 return m.group(0)
             abs_url = to_absolute(val)
@@ -257,7 +250,6 @@ class handler(BaseHTTPRequestHandler):
                 return f'src="{make_proxy(abs_url)}"'
             return m.group(0)
 
-        # Hanya rewrite src= yang ada di elemen DASH (bukan HTML)
         text = re.sub(r'\bsrc="(https?://[^"]+\.(mp4|m4s|m4v|ts|cmf[atuv]|fmp4)[^"]*)"', rewrite_generic_src, text)
 
         return text.encode('utf-8')
@@ -265,7 +257,9 @@ class handler(BaseHTTPRequestHandler):
     def _cors(self):
         self.send_header('Access-Control-Allow-Origin',  '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', '*')
+        # --- PERBAIKAN CORS HEADERS ---
+        self.send_header('Access-Control-Allow-Headers', 'Origin, Accept, Content-Type, Range, Authorization, Cache-Control')
+        self.send_header('Access-Control-Expose-Headers', 'Content-Length, Content-Range')
 
     def _error(self, code: int, msg: str):
         body = msg.encode('utf-8')
