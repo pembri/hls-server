@@ -60,40 +60,52 @@ class handler(BaseHTTPRequestHandler):
         try:
             with urllib.request.urlopen(req, timeout=8) as resp:
                 content_type = resp.headers.get('Content-Type', 'application/octet-stream')
-                body         = resp.read()
 
-            # Kalau m3u8 — rewrite semua segment URL lewat proxy ini juga
-            is_m3u8 = (
-                '.m3u8' in target.lower() or
-                'mpegurl' in content_type.lower() or
-                'x-mpegurl' in content_type.lower()
-            )
+                # Deteksi tipe konten dulu sebelum baca body
+                is_m3u8 = (
+                    '.m3u8' in target.lower() or
+                    'mpegurl' in content_type.lower() or
+                    'x-mpegurl' in content_type.lower()
+                )
+                is_mpd = (
+                    '.mpd' in target.lower() or
+                    'dash+xml' in content_type.lower() or
+                    'application/dash' in content_type.lower()
+                )
 
-            # Kalau mpd — rewrite semua URL segment lewat proxy
-            is_mpd = (
-                '.mpd' in target.lower() or
-                'dash+xml' in content_type.lower() or
-                'application/dash' in content_type.lower()
-            )
-
-            if is_m3u8:
-                body = self._rewrite_m3u8(body, target, referer, ua)
-                content_type = 'application/vnd.apple.mpegurl'
-            elif is_mpd:
-                body = self._rewrite_mpd(body, target, referer, ua)
-                content_type = 'application/dash+xml'
-
-            self.send_response(200)
-            self.send_header('Content-Type',                content_type)
-            self.send_header('Content-Length',              str(len(body)))
-            # Manifest (m3u8/mpd) harus selalu fresh; segment video boleh di-cache browser
-            if is_m3u8 or is_mpd:
-                self.send_header('Cache-Control', 'no-cache, no-store')
-            else:
-                self.send_header('Cache-Control', 'public, max-age=10')
-            self._cors()
-            self.end_headers()
-            self.wfile.write(body)
+                if is_m3u8 or is_mpd:
+                    # Manifest: baca seluruh body untuk rewrite URL
+                    body = resp.read()
+                    if is_m3u8:
+                        body = self._rewrite_m3u8(body, target, referer, ua)
+                        content_type = 'application/vnd.apple.mpegurl'
+                    else:
+                        body = self._rewrite_mpd(body, target, referer, ua)
+                        content_type = 'application/dash+xml'
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Cache-Control', 'no-cache, no-store')
+                    self._cors()
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    # Segmen video/audio: stream langsung chunk by chunk tanpa buffer ke memory
+                    # Ini yang paling penting untuk performa — hindari OOM dan timeout Vercel
+                    content_length = resp.headers.get('Content-Length')
+                    self.send_response(200)
+                    self.send_header('Content-Type', content_type)
+                    if content_length:
+                        self.send_header('Content-Length', content_length)
+                    self.send_header('Cache-Control', 'public, max-age=10')
+                    self._cors()
+                    self.end_headers()
+                    # Stream 64KB per chunk
+                    while True:
+                        chunk = resp.read(65536)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
 
         except urllib.error.HTTPError as e:
             self._error(e.code, f'Upstream HTTP error: {e.code} {e.reason}')
